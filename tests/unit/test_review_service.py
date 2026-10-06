@@ -18,12 +18,20 @@ class TestReviewService:
 
     @pytest.fixture
     def mock_db_session(self):
-        """Create a mock async database session."""
+        """Create a mock async database session.
+
+        By default, execute() resolves to a result whose scalars().first()
+        is truthy, so create_review()'s ownership lookup (issue #67) finds a
+        matching profile unless a test overrides this to exercise the
+        not-owned case.
+        """
         session = AsyncMock()
         session.add = Mock()
         session.commit = AsyncMock()
         session.refresh = AsyncMock()
-        session.execute = AsyncMock()
+        default_result = Mock()
+        default_result.scalars.return_value.first.return_value = Mock()
+        session.execute = AsyncMock(return_value=default_result)
         return session
 
     @pytest.fixture
@@ -69,6 +77,46 @@ class TestReviewService:
             MockReview.assert_called()
             call_kwargs = MockReview.call_args[1]
             assert call_kwargs["status"] == "pending"
+
+    @pytest.mark.asyncio
+    async def test_create_review_returns_none_when_profile_not_owned(
+        self, mock_db_session
+    ):
+        """Test create_review returns None when profile_id does not belong to user_id (issue #67)."""
+        profile_id = uuid4()
+        user_id = uuid4()
+
+        mock_result = Mock()
+        mock_result.scalars.return_value.first.return_value = None
+        mock_db_session.execute = AsyncMock(return_value=mock_result)
+
+        with patch("core.services.review_service.Review") as MockReview:
+            result = await create_review(mock_db_session, profile_id, user_id)
+
+            assert result is None
+            MockReview.assert_not_called()
+            mock_db_session.add.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_create_review_creates_review_when_profile_owned(
+        self, mock_db_session, mock_profile
+    ):
+        """Test create_review still creates a Review when profile_id belongs to user_id."""
+        profile_id = mock_profile.id
+        user_id = mock_profile.user_id
+
+        mock_result = Mock()
+        mock_result.scalars.return_value.first.return_value = mock_profile
+        mock_db_session.execute = AsyncMock(return_value=mock_result)
+
+        with patch("core.services.review_service.Review") as MockReview:
+            result = await create_review(mock_db_session, profile_id, user_id)
+
+            MockReview.assert_called_once()
+            call_kwargs = MockReview.call_args[1]
+            assert call_kwargs["profile_id"] == profile_id
+            mock_db_session.add.assert_called_once()
+            assert result is MockReview.return_value
 
     @pytest.mark.asyncio
     @pytest.mark.xfail(
