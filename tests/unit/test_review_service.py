@@ -79,9 +79,7 @@ class TestReviewService:
             assert call_kwargs["status"] == "pending"
 
     @pytest.mark.asyncio
-    async def test_create_review_returns_none_when_profile_not_owned(
-        self, mock_db_session
-    ):
+    async def test_create_review_returns_none_when_profile_not_owned(self, mock_db_session):
         """Test create_review returns None when profile_id does not belong to user_id (issue #67)."""
         profile_id = uuid4()
         user_id = uuid4()
